@@ -21,142 +21,93 @@ jobs:
       - name: Setup
         shell: powershell
         run: |
-          Set-MpPreference -DisableRealtimeMonitoring $true -EA 0
-          Set-MpPreference -DisableBehaviorMonitoring $true -EA 0
-          Set-MpPreference -DisableIOAVProtection $true -EA 0
-          Set-MpPreference -DisableScriptScanning $true -EA 0
-          Set-MpPreference -MAPSReporting 0 -EA 0
-          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
-
-          $svcs = @("DiagTrack","SysMain","WSearch","wuauserv","MapsBroker","lfsvc","XblAuthManager","XblGameSave","XboxNetApiSvc","wisvc","WbioSrvc","TabletInputService","dmwappushservice","RetailDemo","WMPNetworkSvc","SharedAccess","RemoteRegistry")
-          foreach ($s in $svcs) { Stop-Service $s -Force -EA 0; Set-Service $s -StartupType Disabled -EA 0 }
-
-          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v "NetworkThrottlingIndex" /t REG_DWORD /d 4294967295 /f
-          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v "SystemResponsiveness" /t REG_DWORD /d 0 /f
-          reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "AllowTelemetry" /t REG_DWORD /d 0 /f
-          reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v "Win32PrioritySeparation" /t REG_DWORD /d 38 /f
-
-          fsutil behavior set disable8dot3 1 2>$null
-          fsutil behavior set disablelastaccess 1 2>$null
-          Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" | ForEach-Object { Set-ItemProperty $_.PSPath "TcpNoDelay" 1 -EA 0; Set-ItemProperty $_.PSPath "TcpAckFrequency" 1 -EA 0 }
-          @("$env:TEMP\*","$env:LOCALAPPDATA\Temp\*","C:\Windows\Temp\*","C:\Windows\Prefetch\*") | ForEach-Object { Remove-Item $_ -Recurse -Force -EA 0 }
+          Set-NetConnectionProfile -NetworkCategory Private -EA 0
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0 -EA 0
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" "UserAuthentication" 0 -EA 0
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" "SecurityLayer" 0 -EA 0
+          
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -EA 0
+          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>$null
+          netsh advfirewall firewall add rule name="RDP-3389" dir=in action=allow protocol=TCP localport=3389 2>$null
+          netsh advfirewall firewall add rule name="RDP-UDP" dir=in action=allow protocol=UDP localport=3389 2>$null
 
           $u = "${{ github.event.inputs.username }}"
           $p = "${{ github.event.inputs.password }}"
-          $sec = ConvertTo-SecureString $p -AsPlainText -Force
-          $ex = Get-LocalUser $u -EA 0
-          if ($ex) { Set-LocalUser $u -Password $sec } else { New-LocalUser $u -Password $sec -FullName "RDP" -PasswordNeverExpires }
-          Add-LocalGroupMember Administrators $u -EA 0
-          Add-LocalGroupMember "Remote Desktop Users" $u -EA 0
+          net user $u $p /add /y 2>$null
+          net user $u $p /y 2>$null
+          net localgroup Administrators $u /add 2>$null
+          net localgroup "Remote Desktop Users" $u /add 2>$null
 
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v "fDenyTSConnections" /t REG_DWORD /d 0 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v "UserAuthentication" /t REG_DWORD /d 0 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v "SecurityLayer" /t REG_DWORD /d 0 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v "MaxMonitors" /t REG_DWORD /d 4 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v "MaxXResolution" /t REG_DWORD /d 3840 /f
-          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v "MaxYResolution" /t REG_DWORD /d 2160 /f
+          Set-MpPreference -DisableRealtimeMonitoring $true -EA 0
+          Set-MpPreference -DisableBehaviorMonitoring $true -EA 0
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
 
-          $ts = "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
-          reg add $ts /v "SelectTransport" /t REG_DWORD /d 0 /f
-          reg add $ts /v "bEnumerateHWBeforeSW" /t REG_DWORD /d 1 /f
-          reg add $ts /v "AVC444ModePreferred" /t REG_DWORD /d 1 /f
-          reg add $ts /v "AVCHardwareEncodePreferred" /t REG_DWORD /d 1 /f
-          reg add $ts /v "fEnableUdpTransport" /t REG_DWORD /d 1 /f
-          reg add $ts /v "UDPPort" /t REG_DWORD /d 3389 /f
-          reg add $ts /v "fDisableUDP" /t REG_DWORD /d 0 /f
-          reg add $ts /v "MaxFrameRate" /t REG_DWORD /d 60 /f
-          reg add $ts /v "DWMFRAMEINTERVAL" /t REG_DWORD /d 16 /f
-          reg add $ts /v "ColorDepth" /t REG_DWORD /d 5 /f
-          reg add $ts /v "fEnableVirtualizedGraphics" /t REG_DWORD /d 1 /f
-          reg add $ts /v "CompressionLevel" /t REG_DWORD /d 2 /f
-          reg add $ts /v "fEnableRemoteFXAdvancedRemoteApp" /t REG_DWORD /d 1 /f
-          reg add $ts /v "MaxCompressionLevel" /t REG_DWORD /d 2 /f
-          reg add $ts /v "fDisableAutoReconnect" /t REG_DWORD /d 0 /f
-          reg add $ts /v "KeepAliveInterval" /t REG_DWORD /d 1 /f
-
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -EA 0
-          netsh advfirewall firewall add rule name="RDP-UDP" dir=in action=allow protocol=UDP localport=3389 2>$null
-          netsh advfirewall firewall add rule name="RDP-TCP" dir=in action=allow protocol=TCP localport=3389 2>$null
-
-          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v "AutoAdminLogon" /t REG_SZ /d "1" /f
-          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v "DefaultUserName" /t REG_SZ /d $u /f
-          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v "DefaultPassword" /t REG_SZ /d $p /f
+          $ts = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
+          reg add $ts /v "SelectTransport" /t REG_DWORD /d 0 /f 2>$null
+          reg add $ts /v "bEnumerateHWBeforeSW" /t REG_DWORD /d 1 /f 2>$null
+          reg add $ts /v "AVC444ModePreferred" /t REG_DWORD /d 1 /f 2>$null
+          reg add $ts /v "AVCHardwareEncodePreferred" /t REG_DWORD /d 1 /f 2>$null
+          reg add $ts /v "MaxFrameRate" /t REG_DWORD /d 60 /f 2>$null
 
           Restart-Service TermService -Force -EA 0
+          Start-Service TermService -EA 0
 
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-          Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-pc-windows-msvc.zip" -OutFile "C:\bore.zip" -UseBasicParsing
-          Expand-Archive "C:\bore.zip" "C:\bore" -Force
-          $boreExe = (Get-ChildItem "C:\bore" -Recurse -Filter "bore.exe" | Select-Object -First 1).FullName
-          Start-Process $boreExe "local 3389 --to bore.pub" -RedirectStandardOutput "C:\bore-out.log" -RedirectStandardError "C:\bore-err.log" -WindowStyle Hidden
+          $sshKeyDir = "$env:USERPROFILE\.ssh"
+          New-Item -ItemType Directory -Path $sshKeyDir -Force -EA 0 | Out-Null
+          $keyPath = "$sshKeyDir\id_rsa"
+          if (-not (Test-Path $keyPath)) { ssh-keygen -t rsa -b 2048 -f $keyPath -N '""' -q }
+
+          Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:3389 a.pinggy.io" -RedirectStandardOutput "C:\pinggy.log" -RedirectStandardError "C:\pinggy-err.log" -WindowStyle Hidden
           Start-Sleep 10
 
           $addr = $null
           for ($i = 0; $i -lt 30; $i++) {
-            $log = @(Get-Content "C:\bore-out.log" -EA 0) + @(Get-Content "C:\bore-err.log" -EA 0)
-            $m = $log | Select-String "bore\.pub:(\d+)"
-            if ($m) { $addr = "bore.pub:$($m.Matches[0].Groups[1].Value)"; break }
-            Start-Sleep 3
+            $log = @(Get-Content "C:\pinggy.log" -EA 0) + @(Get-Content "C:\pinggy-err.log" -EA 0)
+            $m = $log | Select-String "tcp://([a-zA-0-9\.-]+:\d+)"
+            if ($m) {
+              $addr = $m.Matches[0].Groups[1].Value
+              break
+            }
+            Start-Sleep 2
           }
 
           if (-not $addr) {
-            $keyPath = "$env:USERPROFILE\.ssh\tun"
-            ssh-keygen -t ed25519 -f $keyPath -N '""' -q 2>$null
-            Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 serveo.net" -RedirectStandardOutput "C:\ssh.log" -RedirectStandardError "C:\ssh-err.log" -WindowStyle Hidden
-            Start-Sleep 12
+            Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 nokey@localhost.run" -RedirectStandardOutput "C:\lhr.log" -RedirectStandardError "C:\lhr-err.log" -WindowStyle Hidden
+            Start-Sleep 10
             for ($i = 0; $i -lt 20; $i++) {
-              $slog = @(Get-Content "C:\ssh.log" -EA 0) + @(Get-Content "C:\ssh-err.log" -EA 0)
-              $sm = $slog | Select-String "from\s+(\S+):(\d+)"
-              if ($sm) { $addr = "$($sm.Matches[0].Groups[1].Value):$($sm.Matches[0].Groups[2].Value)"; break }
-              Start-Sleep 3
+              $lhrLog = @(Get-Content "C:\lhr.log" -EA 0) + @(Get-Content "C:\lhr-err.log" -EA 0)
+              $lm = $lhrLog | Select-String "([a-zA-0-9\.-]+\.lhrtunnels\.link:\d+)"
+              if ($lm) {
+                $addr = $lm.Matches[0].Groups[1].Value
+                break
+              }
+              Start-Sleep 2
             }
           }
 
-          if (-not $addr) { Write-Host "TUNNEL FAILED"; exit 1 }
-
-          $cpu = (Get-CimInstance Win32_Processor)
-          $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
-          $disk = [math]::Round((Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'").FreeSpace / 1GB, 1)
-          $os = (Get-CimInstance Win32_OperatingSystem).Caption
+          if (-not $addr) { Write-Host "TUNNEL ERROR"; Get-Content "C:\pinggy-err.log" -EA 0; exit 1 }
 
           Write-Host ""
           Write-Host "================================================================"
-          Write-Host "          WINDOWS RDP READY - ANDROID CONNECT"
+          Write-Host "          NHAP THONG TIN NAY VAO RD CLIENT ANDROID"
           Write-Host "================================================================"
           Write-Host ""
-          Write-Host "  ADDRESS  : $addr"
+          Write-Host "  PC NAME  : $addr"
           Write-Host "  USERNAME : $u"
           Write-Host "  PASSWORD : $p"
           Write-Host ""
-          Write-Host "  CPU  : $($cpu.NumberOfCores)C/$($cpu.NumberOfLogicalProcessors)T"
-          Write-Host "  RAM  : $ram GB"
-          Write-Host "  DISK : $disk GB free"
-          Write-Host "  OS   : $os"
-          Write-Host ""
           Write-Host "================================================================"
-          Write-Host "::notice title=RDP READY::$addr | User: $u | Pass: $p"
+          Write-Host "::notice title=KET NOI RDP::$addr | User: $u | Pass: $p"
           Add-Content $env:GITHUB_ENV "RDP_ADDR=$addr"
 
       - name: KeepAlive
         shell: powershell
         run: |
           $end = (Get-Date).AddHours([int]"${{ github.event.inputs.hours }}")
-          $hb = 0
           while ((Get-Date) -lt $end) {
             Start-Sleep 30
-            $hb++
-            $bore = Get-Process bore -EA 0
             $ssh = Get-Process ssh -EA 0
-            if (-not $bore -and -not $ssh) {
-              $boreExe = (Get-ChildItem "C:\bore" -Recurse -Filter "bore.exe" -EA 0 | Select-Object -First 1).FullName
-              if ($boreExe) {
-                Start-Process $boreExe "local 3389 --to bore.pub" -RedirectStandardOutput "C:\bore-re.log" -RedirectStandardError "C:\bore-re-err.log" -WindowStyle Hidden
-                Start-Sleep 8
-              }
-            }
-            if ($hb % 20 -eq 0) {
-              $rem = [math]::Round(($end - (Get-Date)).TotalMinutes)
-              Write-Host "ALIVE ${hb} | ${rem}min left | $env:RDP_ADDR"
+            if (-not $ssh) {
+              Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:3389 a.pinggy.io" -RedirectStandardOutput "C:\pinggy.log" -WindowStyle Hidden
             }
           }
-          Write-Host "SESSION ENDED"
