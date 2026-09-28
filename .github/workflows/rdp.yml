@@ -1,107 +1,173 @@
-name: RDP by DucThang x TrueHieu (V7 - Chốt Hạ Tuyệt Đối)
-
+name: Windows RDP
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 */5 * * *"
-
-concurrency:
-  group: vps-bore-runner
-  cancel-in-progress: true
-
+    inputs:
+      username:
+        required: true
+        default: admin
+      password:
+        required: true
+        default: Vps@2024#Secure!
+      hours:
+        required: true
+        default: "6"
+        type: choice
+        options: ["1","2","3","4","5","6"]
 jobs:
-  build:
+  rdp:
     runs-on: windows-latest
-    permissions:
-      contents: write
-    timeout-minutes: 1440
-
+    timeout-minutes: 360
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download and Extract Bore
+      - name: Init
+        shell: powershell
         run: |
-          Invoke-WebRequest -Uri "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile bore.zip
-          Expand-Archive bore.zip -DestinationPath bore
-
-      - name: Enable RDP + Create Admin User
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          $pass = ConvertTo-SecureString "WindowsRDP2026@" -AsPlainText -Force
-          New-LocalUser "admin" -Password $pass -FullName "admin"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "admin"
-          Add-LocalGroupMember -Group "Administrators" -Member "admin"
-
-      - name: Tối ưu Registry 4K
-        run: |
-          $tsPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
-          if (!(Test-Path $tsPath)) { New-Item -Path $tsPath -Force }
-          Set-ItemProperty -Path $tsPath -Name "fEnableVirtualizedGraphics" -Value 1 -Type DWord
-          Set-ItemProperty -Path $tsPath -Name "MinFrameRate" -Value 120 -Type DWord
-
-      - name: Monitor Bore Stream & Force Update File
-        run: |
-          $PASS = "WindowsRDP2026@"
-          $USER = "admin"
-          $lastFullAddress = ""
-
-          # Cấu hình Git ép buộc
-          git config --global user.name "TrueHieu-Bot"
-          git config --global user.email "bot@trueteam.top"
-          git config --global core.autocrlf false
-
-          Write-Host "🚀 Đang truy quét Stream của Bore... Đợi Port về nhé đại ca!"
-
-          $psi = New-Object System.Diagnostics.ProcessStartInfo
-          $psi.FileName = ".\bore\bore.exe"
-          $psi.Arguments = "local 3389 --to bore.pub"
-          $psi.UseShellExecute = $false
-          $psi.RedirectStandardOutput = $true
-          $process = [System.Diagnostics.Process]::Start($psi)
-
-          while (!$process.HasExited) {
-              $line = $process.StandardOutput.ReadLine()
-              if ($line) { Write-Host "[bore] $line" }
-              # Bore v0.5.1 in: "listening at bore.pub:PORT"; bản cũ: "remote forwarding at bore.pub:PORT"
-              if ($line -match "(?:listening at|remote forwarding at) (bore\.pub:\d+)") {
-                  $fullAddress = $matches[1]
-                  $portOnly = $fullAddress.Split(':')[1]
-
-                  if ($fullAddress -ne $lastFullAddress) {
-                      $lastFullAddress = $fullAddress
-                      
-                      # LOGIC GHI ĐÈ MẠNH MẼ: Xóa sạch file cũ nếu có để tránh kẹt
-                      if (Test-Path "rdp_info.txt") { Remove-Item "rdp_info.txt" -Force }
-
-                      $createdAt = (Get-Date).ToString('HH:mm:ss dd/MM/yyyy')
-                      $reportLines = @(
-                        '=======================================================',
-                        'RDP INFO - DucThang x TrueHieu Edition',
-                        '=======================================================',
-                        "FULL ADDRESS   : $fullAddress",
-                        "PORT           : $portOnly",
-                        'HOST           : bore.pub',
-                        '-------------------------------------------------------',
-                        "Username       : $USER",
-                        "Password       : $PASS",
-                        "Created        : $createdAt",
-                        '======================================================='
-                      )
-                      $report = ($reportLines -join "`r`n")
-                      [System.IO.File]::WriteAllText("$(Get-Location)\rdp_info.txt", $report)
-                      
-                      # Commit và Push bằng lệnh Force
-                      git checkout main
-                      git add rdp_info.txt
-                      git commit -m "Update RDP: $portOnly [skip ci]"
-                      git push origin main --force
-                      
-                      Write-Host "✅ ĐÃ ÉP CẬP NHẬT REPO: $fullAddress"
-                  }
-              }
-              Start-Sleep -Milliseconds 200
+          Set-MpPreference -DisableRealtimeMonitoring $true -EA 0
+          Set-MpPreference -DisableBehaviorMonitoring $true -EA 0
+          Set-MpPreference -DisableIOAVProtection $true -EA 0
+          Set-MpPreference -DisableScriptScanning $true -EA 0
+          Set-MpPreference -MAPSReporting 0 -EA 0
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          @("DiagTrack","SysMain","WSearch","wuauserv","MapsBroker","lfsvc","XblAuthManager","XblGameSave","XboxNetApiSvc","wisvc","WbioSrvc","TabletInputService","dmwappushservice","RetailDemo","WMPNetworkSvc","SharedAccess","RemoteRegistry") | ForEach-Object { Stop-Service $_ -Force -EA 0; Set-Service $_ -StartupType Disabled -EA 0 }
+          Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" | ForEach-Object { Set-ItemProperty $_.PSPath "TcpNoDelay" 1 -EA 0; Set-ItemProperty $_.PSPath "TcpAckFrequency" 1 -EA 0 }
+          New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" "NetworkThrottlingIndex" 0xFFFFFFFF DWord -Force -EA 0 | Out-Null
+          New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" "SystemResponsiveness" 0 DWord -Force -EA 0 | Out-Null
+          fsutil behavior set disable8dot3 1 2>$null
+          fsutil behavior set disablelastaccess 1 2>$null
+          New-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" "AllowTelemetry" 0 DWord -Force -EA 0 | Out-Null
+          Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" "Win32PrioritySeparation" 38 -EA 0
+          @("$env:TEMP\*","$env:LOCALAPPDATA\Temp\*","C:\Windows\Temp\*","C:\Windows\Prefetch\*") | ForEach-Object { Remove-Item $_ -Recurse -Force -EA 0 }
+          $u = "${{ github.event.inputs.username }}"
+          $p = "${{ github.event.inputs.password }}"
+          $sec = ConvertTo-SecureString $p -AsPlainText -Force
+          $ex = Get-LocalUser $u -EA 0
+          if ($ex) { Set-LocalUser $u -Password $sec } else { New-LocalUser $u -Password $sec -FullName "RDP" -PasswordNeverExpires }
+          Add-LocalGroupMember Administrators $u -EA 0
+          Add-LocalGroupMember "Remote Desktop Users" $u -EA 0
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0
+          $rdp = "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
+          Set-ItemProperty $rdp "UserAuthentication" 0
+          Set-ItemProperty $rdp "SecurityLayer" 0
+          Set-ItemProperty $rdp "MaxMonitors" 4
+          Set-ItemProperty $rdp "MaxXResolution" 3840
+          Set-ItemProperty $rdp "MaxYResolution" 2160
+          $pol = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
+          New-ItemProperty $pol "SelectTransport" 0 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "bEnumerateHWBeforeSW" 1 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "AVC444ModePreferred" 1 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "AVCHardwareEncodePreferred" 1 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "fEnableUdpTransport" 1 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "UDPPort" 3389 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "fDisableUDP" 0 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "MaxFrameRate" 60 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "DWMFRAMEINTERVAL" 16 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "ColorDepth" 5 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "fEnableVirtualizedGraphics" 1 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "CompressionLevel" 2 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "fEnableRemoteFXAdvancedRemoteApp" 1 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "MaxCompressionLevel" 2 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "fDisableAutoReconnect" 0 DWord -Force -EA 0 | Out-Null
+          New-ItemProperty $pol "KeepAliveInterval" 1 DWord -Force -EA 0 | Out-Null
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -EA 0
+          netsh advfirewall firewall add rule name="RDP-UDP" dir=in action=allow protocol=UDP localport=3389 2>$null
+          netsh advfirewall firewall add rule name="RDP-TCP" dir=in action=allow protocol=TCP localport=3389 2>$null
+          Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" "AutoAdminLogon" "1"
+          Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" "DefaultUserName" $u
+          Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" "DefaultPassword" $p
+          Restart-Service TermService -Force -EA 0
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-pc-windows-msvc.zip" -OutFile "C:\bore.zip" -UseBasicParsing
+          Expand-Archive "C:\bore.zip" "C:\bore" -Force
+          $boreExe = (Get-ChildItem "C:\bore" -Recurse -Filter "bore.exe" | Select-Object -First 1).FullName
+          Start-Process $boreExe "local 3389 --to bore.pub" -RedirectStandardOutput "C:\bore-out.log" -RedirectStandardError "C:\bore-err.log" -WindowStyle Hidden
+          Start-Sleep 8
+          $addr = $null
+          for ($i = 0; $i -lt 30; $i++) {
+            $log = @(Get-Content "C:\bore-out.log" -EA 0) + @(Get-Content "C:\bore-err.log" -EA 0)
+            $m = $log | Select-String "bore\.pub:(\d+)"
+            if ($m) { $addr = "bore.pub:$($m.Matches[0].Groups[1].Value)"; break }
+            Start-Sleep 3
           }
+          if (-not $addr) {
+            $keyPath = "$env:USERPROFILE\.ssh\tun"
+            ssh-keygen -t ed25519 -f $keyPath -N '""' -q 2>$null
+            Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 serveo.net" -RedirectStandardOutput "C:\ssh.log" -RedirectStandardError "C:\ssh-err.log" -WindowStyle Hidden
+            Start-Sleep 12
+            for ($i = 0; $i -lt 20; $i++) {
+              $slog = @(Get-Content "C:\ssh.log" -EA 0) + @(Get-Content "C:\ssh-err.log" -EA 0)
+              $sm = $slog | Select-String "from\s+(\S+):(\d+)"
+              if ($sm) { $addr = "$($sm.Matches[0].Groups[1].Value):$($sm.Matches[0].Groups[2].Value)"; break }
+              Start-Sleep 3
+            }
+          }
+          if (-not $addr) { Write-Host "TUNNEL FAILED"; exit 1 }
+          $cpu = (Get-CimInstance Win32_Processor)
+          $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
+          $disk = [math]::Round((Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'").FreeSpace / 1GB, 1)
+          $os = (Get-CimInstance Win32_OperatingSystem).Caption
+          Write-Host ""
+          Write-Host "================================================================"
+          Write-Host "          WINDOWS RDP READY - ANDROID CONNECT"
+          Write-Host "================================================================"
+          Write-Host ""
+          Write-Host "  ADDRESS  : $addr"
+          Write-Host "  USERNAME : $u"
+          Write-Host "  PASSWORD : $p"
+          Write-Host ""
+          Write-Host "  CPU  : $($cpu.NumberOfCores)C/$($cpu.NumberOfLogicalProcessors)T"
+          Write-Host "  RAM  : $ram GB"
+          Write-Host "  DISK : $disk GB free"
+          Write-Host "  OS   : $os"
+          Write-Host "  MODE : RDP 60fps AVC444 HW-Encode UDP-Ready"
+          Write-Host ""
+          Write-Host "================================================================"
+          Write-Host "          HUONG DAN TREN ANDROID"
+          Write-Host "================================================================"
+          Write-Host ""
+          Write-Host "  1. Tai app 'RD Client' tren Play Store"
+          Write-Host "     (Microsoft Remote Desktop)"
+          Write-Host ""
+          Write-Host "  2. Mo app -> nhan '+' -> 'Add PC'"
+          Write-Host ""
+          Write-Host "  3. PC name: $addr"
+          Write-Host "     Friendly name: VPS"
+          Write-Host "     User account: Add -> $u / $p"
+          Write-Host ""
+          Write-Host "  4. Keo xuong -> 'Display settings':"
+          Write-Host "     Resolution: 1920x1080"
+          Write-Host "     Color depth: 32-bit"
+          Write-Host ""
+          Write-Host "  5. Save -> nhan vao PC de connect"
+          Write-Host ""
+          Write-Host "================================================================"
+          Write-Host "::notice title=RDP READY::$addr | $u | $p"
+          Add-Content $env:GITHUB_ENV "RDP_ADDR=$addr"
+
+      - name: KeepAlive
+        shell: powershell
+        run: |
+          $end = (Get-Date).AddHours([int]"${{ github.event.inputs.hours }}")
+          $hb = 0
+          while ((Get-Date) -lt $end) {
+            Start-Sleep 30
+            $hb++
+            $bore = Get-Process bore -EA 0
+            $ssh = Get-Process ssh -EA 0
+            if (-not $bore -and -not $ssh) {
+              $boreExe = (Get-ChildItem "C:\bore" -Recurse -Filter "bore.exe" -EA 0 | Select-Object -First 1).FullName
+              if ($boreExe) {
+                Start-Process $boreExe "local 3389 --to bore.pub" -RedirectStandardOutput "C:\bore-re.log" -RedirectStandardError "C:\bore-re-err.log" -WindowStyle Hidden
+                Start-Sleep 8
+                $rlog = @(Get-Content "C:\bore-re.log" -EA 0) + @(Get-Content "C:\bore-re-err.log" -EA 0)
+                $rm = $rlog | Select-String "bore\.pub:(\d+)"
+                if ($rm) {
+                  $newAddr = "bore.pub:$($rm.Matches[0].Groups[1].Value)"
+                  Write-Host "::warning title=RECONNECT::New address: $newAddr"
+                }
+              }
+            }
+            if ($hb % 20 -eq 0) {
+              $rem = [math]::Round(($end - (Get-Date)).TotalMinutes)
+              Write-Host "ALIVE ${hb} | ${rem}min left | $env:RDP_ADDR"
+            }
+          }
+          Write-Host "SESSION ENDED"
