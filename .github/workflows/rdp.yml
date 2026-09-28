@@ -18,7 +18,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
-      - name: Init
+      - name: Setup
         shell: powershell
         run: |
           Set-MpPreference -DisableRealtimeMonitoring $true -EA 0
@@ -26,16 +26,21 @@ jobs:
           Set-MpPreference -DisableIOAVProtection $true -EA 0
           Set-MpPreference -DisableScriptScanning $true -EA 0
           Set-MpPreference -MAPSReporting 0 -EA 0
-          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
-          @("DiagTrack","SysMain","WSearch","wuauserv","MapsBroker","lfsvc","XblAuthManager","XblGameSave","XboxNetApiSvc","wisvc","WbioSrvc","TabletInputService","dmwappushservice","RetailDemo","WMPNetworkSvc","SharedAccess","RemoteRegistry") | ForEach-Object { Stop-Service $_ -Force -EA 0; Set-Service $_ -StartupType Disabled -EA 0 }
-          Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" | ForEach-Object { Set-ItemProperty $_.PSPath "TcpNoDelay" 1 -EA 0; Set-ItemProperty $_.PSPath "TcpAckFrequency" 1 -EA 0 }
-          New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" "NetworkThrottlingIndex" 0xFFFFFFFF DWord -Force -EA 0 | Out-Null
-          New-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" "SystemResponsiveness" 0 DWord -Force -EA 0 | Out-Null
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
+
+          $svcs = @("DiagTrack","SysMain","WSearch","wuauserv","MapsBroker","lfsvc","XblAuthManager","XblGameSave","XboxNetApiSvc","wisvc","WbioSrvc","TabletInputService","dmwappushservice","RetailDemo","WMPNetworkSvc","SharedAccess","RemoteRegistry")
+          foreach ($s in $svcs) { Stop-Service $s -Force -EA 0; Set-Service $s -StartupType Disabled -EA 0 }
+
+          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v "NetworkThrottlingIndex" /t REG_DWORD /d 4294967295 /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" /v "SystemResponsiveness" /t REG_DWORD /d 0 /f
+          reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection" /v "AllowTelemetry" /t REG_DWORD /d 0 /f
+          reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v "Win32PrioritySeparation" /t REG_DWORD /d 38 /f
+
           fsutil behavior set disable8dot3 1 2>$null
           fsutil behavior set disablelastaccess 1 2>$null
-          New-ItemProperty "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" "AllowTelemetry" 0 DWord -Force -EA 0 | Out-Null
-          Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\PriorityControl" "Win32PrioritySeparation" 38 -EA 0
+          Get-ChildItem "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces" | ForEach-Object { Set-ItemProperty $_.PSPath "TcpNoDelay" 1 -EA 0; Set-ItemProperty $_.PSPath "TcpAckFrequency" 1 -EA 0 }
           @("$env:TEMP\*","$env:LOCALAPPDATA\Temp\*","C:\Windows\Temp\*","C:\Windows\Prefetch\*") | ForEach-Object { Remove-Item $_ -Recurse -Force -EA 0 }
+
           $u = "${{ github.event.inputs.username }}"
           $p = "${{ github.event.inputs.password }}"
           $sec = ConvertTo-SecureString $p -AsPlainText -Force
@@ -43,43 +48,49 @@ jobs:
           if ($ex) { Set-LocalUser $u -Password $sec } else { New-LocalUser $u -Password $sec -FullName "RDP" -PasswordNeverExpires }
           Add-LocalGroupMember Administrators $u -EA 0
           Add-LocalGroupMember "Remote Desktop Users" $u -EA 0
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0
-          $rdp = "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
-          Set-ItemProperty $rdp "UserAuthentication" 0
-          Set-ItemProperty $rdp "SecurityLayer" 0
-          Set-ItemProperty $rdp "MaxMonitors" 4
-          Set-ItemProperty $rdp "MaxXResolution" 3840
-          Set-ItemProperty $rdp "MaxYResolution" 2160
-          $pol = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
-          New-ItemProperty $pol "SelectTransport" 0 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "bEnumerateHWBeforeSW" 1 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "AVC444ModePreferred" 1 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "AVCHardwareEncodePreferred" 1 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "fEnableUdpTransport" 1 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "UDPPort" 3389 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "fDisableUDP" 0 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "MaxFrameRate" 60 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "DWMFRAMEINTERVAL" 16 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "ColorDepth" 5 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "fEnableVirtualizedGraphics" 1 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "CompressionLevel" 2 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "fEnableRemoteFXAdvancedRemoteApp" 1 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "MaxCompressionLevel" 2 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "fDisableAutoReconnect" 0 DWord -Force -EA 0 | Out-Null
-          New-ItemProperty $pol "KeepAliveInterval" 1 DWord -Force -EA 0 | Out-Null
+
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server" /v "fDenyTSConnections" /t REG_DWORD /d 0 /f
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v "UserAuthentication" /t REG_DWORD /d 0 /f
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v "SecurityLayer" /t REG_DWORD /d 0 /f
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v "MaxMonitors" /t REG_DWORD /d 4 /f
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v "MaxXResolution" /t REG_DWORD /d 3840 /f
+          reg add "HKLM\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v "MaxYResolution" /t REG_DWORD /d 2160 /f
+
+          $ts = "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
+          reg add $ts /v "SelectTransport" /t REG_DWORD /d 0 /f
+          reg add $ts /v "bEnumerateHWBeforeSW" /t REG_DWORD /d 1 /f
+          reg add $ts /v "AVC444ModePreferred" /t REG_DWORD /d 1 /f
+          reg add $ts /v "AVCHardwareEncodePreferred" /t REG_DWORD /d 1 /f
+          reg add $ts /v "fEnableUdpTransport" /t REG_DWORD /d 1 /f
+          reg add $ts /v "UDPPort" /t REG_DWORD /d 3389 /f
+          reg add $ts /v "fDisableUDP" /t REG_DWORD /d 0 /f
+          reg add $ts /v "MaxFrameRate" /t REG_DWORD /d 60 /f
+          reg add $ts /v "DWMFRAMEINTERVAL" /t REG_DWORD /d 16 /f
+          reg add $ts /v "ColorDepth" /t REG_DWORD /d 5 /f
+          reg add $ts /v "fEnableVirtualizedGraphics" /t REG_DWORD /d 1 /f
+          reg add $ts /v "CompressionLevel" /t REG_DWORD /d 2 /f
+          reg add $ts /v "fEnableRemoteFXAdvancedRemoteApp" /t REG_DWORD /d 1 /f
+          reg add $ts /v "MaxCompressionLevel" /t REG_DWORD /d 2 /f
+          reg add $ts /v "fDisableAutoReconnect" /t REG_DWORD /d 0 /f
+          reg add $ts /v "KeepAliveInterval" /t REG_DWORD /d 1 /f
+
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -EA 0
           netsh advfirewall firewall add rule name="RDP-UDP" dir=in action=allow protocol=UDP localport=3389 2>$null
           netsh advfirewall firewall add rule name="RDP-TCP" dir=in action=allow protocol=TCP localport=3389 2>$null
-          Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" "AutoAdminLogon" "1"
-          Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" "DefaultUserName" $u
-          Set-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" "DefaultPassword" $p
+
+          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v "AutoAdminLogon" /t REG_SZ /d "1" /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v "DefaultUserName" /t REG_SZ /d $u /f
+          reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v "DefaultPassword" /t REG_SZ /d $p /f
+
           Restart-Service TermService -Force -EA 0
+
           [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
           Invoke-WebRequest "https://github.com/ekzhang/bore/releases/download/v0.5.2/bore-v0.5.2-x86_64-pc-windows-msvc.zip" -OutFile "C:\bore.zip" -UseBasicParsing
           Expand-Archive "C:\bore.zip" "C:\bore" -Force
           $boreExe = (Get-ChildItem "C:\bore" -Recurse -Filter "bore.exe" | Select-Object -First 1).FullName
           Start-Process $boreExe "local 3389 --to bore.pub" -RedirectStandardOutput "C:\bore-out.log" -RedirectStandardError "C:\bore-err.log" -WindowStyle Hidden
-          Start-Sleep 8
+          Start-Sleep 10
+
           $addr = $null
           for ($i = 0; $i -lt 30; $i++) {
             $log = @(Get-Content "C:\bore-out.log" -EA 0) + @(Get-Content "C:\bore-err.log" -EA 0)
@@ -87,6 +98,7 @@ jobs:
             if ($m) { $addr = "bore.pub:$($m.Matches[0].Groups[1].Value)"; break }
             Start-Sleep 3
           }
+
           if (-not $addr) {
             $keyPath = "$env:USERPROFILE\.ssh\tun"
             ssh-keygen -t ed25519 -f $keyPath -N '""' -q 2>$null
@@ -99,11 +111,14 @@ jobs:
               Start-Sleep 3
             }
           }
+
           if (-not $addr) { Write-Host "TUNNEL FAILED"; exit 1 }
+
           $cpu = (Get-CimInstance Win32_Processor)
           $ram = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
           $disk = [math]::Round((Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'").FreeSpace / 1GB, 1)
           $os = (Get-CimInstance Win32_OperatingSystem).Caption
+
           Write-Host ""
           Write-Host "================================================================"
           Write-Host "          WINDOWS RDP READY - ANDROID CONNECT"
@@ -117,29 +132,9 @@ jobs:
           Write-Host "  RAM  : $ram GB"
           Write-Host "  DISK : $disk GB free"
           Write-Host "  OS   : $os"
-          Write-Host "  MODE : RDP 60fps AVC444 HW-Encode UDP-Ready"
           Write-Host ""
           Write-Host "================================================================"
-          Write-Host "          HUONG DAN TREN ANDROID"
-          Write-Host "================================================================"
-          Write-Host ""
-          Write-Host "  1. Tai app 'RD Client' tren Play Store"
-          Write-Host "     (Microsoft Remote Desktop)"
-          Write-Host ""
-          Write-Host "  2. Mo app -> nhan '+' -> 'Add PC'"
-          Write-Host ""
-          Write-Host "  3. PC name: $addr"
-          Write-Host "     Friendly name: VPS"
-          Write-Host "     User account: Add -> $u / $p"
-          Write-Host ""
-          Write-Host "  4. Keo xuong -> 'Display settings':"
-          Write-Host "     Resolution: 1920x1080"
-          Write-Host "     Color depth: 32-bit"
-          Write-Host ""
-          Write-Host "  5. Save -> nhan vao PC de connect"
-          Write-Host ""
-          Write-Host "================================================================"
-          Write-Host "::notice title=RDP READY::$addr | $u | $p"
+          Write-Host "::notice title=RDP READY::$addr | User: $u | Pass: $p"
           Add-Content $env:GITHUB_ENV "RDP_ADDR=$addr"
 
       - name: KeepAlive
@@ -157,12 +152,6 @@ jobs:
               if ($boreExe) {
                 Start-Process $boreExe "local 3389 --to bore.pub" -RedirectStandardOutput "C:\bore-re.log" -RedirectStandardError "C:\bore-re-err.log" -WindowStyle Hidden
                 Start-Sleep 8
-                $rlog = @(Get-Content "C:\bore-re.log" -EA 0) + @(Get-Content "C:\bore-re-err.log" -EA 0)
-                $rm = $rlog | Select-String "bore\.pub:(\d+)"
-                if ($rm) {
-                  $newAddr = "bore.pub:$($rm.Matches[0].Groups[1].Value)"
-                  Write-Host "::warning title=RECONNECT::New address: $newAddr"
-                }
               }
             }
             if ($hb % 20 -eq 0) {
