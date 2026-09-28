@@ -21,93 +21,69 @@ jobs:
       - name: Setup
         shell: powershell
         run: |
-          Set-NetConnectionProfile -NetworkCategory Private -EA 0
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0 -EA 0
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" "UserAuthentication" 0 -EA 0
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" "SecurityLayer" 0 -EA 0
-          
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -EA 0
-          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>$null
-          netsh advfirewall firewall add rule name="RDP-3389" dir=in action=allow protocol=TCP localport=3389 2>$null
-          netsh advfirewall firewall add rule name="RDP-UDP" dir=in action=allow protocol=UDP localport=3389 2>$null
-
-          $u = "${{ github.event.inputs.username }}"
-          $p = "${{ github.event.inputs.password }}"
-          net user $u $p /add /y 2>$null
-          net user $u $p /y 2>$null
-          net localgroup Administrators $u /add 2>$null
-          net localgroup "Remote Desktop Users" $u /add 2>$null
-
           Set-MpPreference -DisableRealtimeMonitoring $true -EA 0
           Set-MpPreference -DisableBehaviorMonitoring $true -EA 0
-          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
-
-          $ts = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
-          reg add $ts /v "SelectTransport" /t REG_DWORD /d 0 /f 2>$null
-          reg add $ts /v "bEnumerateHWBeforeSW" /t REG_DWORD /d 1 /f 2>$null
-          reg add $ts /v "AVC444ModePreferred" /t REG_DWORD /d 1 /f 2>$null
-          reg add $ts /v "AVCHardwareEncodePreferred" /t REG_DWORD /d 1 /f 2>$null
-          reg add $ts /v "MaxFrameRate" /t REG_DWORD /d 60 /f 2>$null
-
+          
+          $u = "${{ github.event.inputs.username }}"
+          $p = "${{ github.event.inputs.password }}"
+          $sec = ConvertTo-SecureString $p -AsPlainText -Force
+          if (Get-LocalUser $u -EA 0) { Set-LocalUser $u -Password $sec } else { New-LocalUser $u -Password $sec -PasswordNeverExpires }
+          Add-LocalGroupMember Administrators $u -EA 0
+          Add-LocalGroupMember "Remote Desktop Users" $u -EA 0
+          
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" "UserAuthentication" 0
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" "SecurityLayer" 0
+          
+          $path = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
+          if (-not (Test-Path $path)) { New-Item $path -Force | Out-Null }
+          Set-ItemProperty $path "SelectTransport" 0 -EA 0
+          Set-ItemProperty $path "bEnumerateHWBeforeSW" 1 -EA 0
+          Set-ItemProperty $path "AVC444ModePreferred" 1 -EA 0
+          Set-ItemProperty $path "AVCHardwareEncodePreferred" 1 -EA 0
+          Set-ItemProperty $path "fEnableUdpTransport" 1 -EA 0
+          Set-ItemProperty $path "MaxFrameRate" 60 -EA 0
+          
+          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>$null
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -EA 0
+          
           Restart-Service TermService -Force -EA 0
-          Start-Service TermService -EA 0
-
-          $sshKeyDir = "$env:USERPROFILE\.ssh"
-          New-Item -ItemType Directory -Path $sshKeyDir -Force -EA 0 | Out-Null
-          $keyPath = "$sshKeyDir\id_rsa"
-          if (-not (Test-Path $keyPath)) { ssh-keygen -t rsa -b 2048 -f $keyPath -N '""' -q }
-
-          Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:3389 a.pinggy.io" -RedirectStandardOutput "C:\pinggy.log" -RedirectStandardError "C:\pinggy-err.log" -WindowStyle Hidden
+          
+          $sshDir = "$env:USERPROFILE\.ssh"
+          if (-not (Test-Path $sshDir)) { New-Item -ItemType Directory $sshDir -Force | Out-Null }
+          if (-not (Test-Path "$sshDir\id_rsa")) { ssh-keygen -t rsa -b 2048 -f "$sshDir\id_rsa" -N '""' -q }
+          
+          Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:3389 a.pinggy.io" -RedirectStandardOutput "C:\p.log" -RedirectStandardError "C:\p-e.log" -WindowStyle Hidden
           Start-Sleep 10
-
+          
           $addr = $null
-          for ($i = 0; $i -lt 30; $i++) {
-            $log = @(Get-Content "C:\pinggy.log" -EA 0) + @(Get-Content "C:\pinggy-err.log" -EA 0)
-            $m = $log | Select-String "tcp://([a-zA-0-9\.-]+:\d+)"
-            if ($m) {
-              $addr = $m.Matches[0].Groups[1].Value
-              break
-            }
-            Start-Sleep 2
-          }
-
+          $log = Get-Content "C:\p.log" -EA 0
+          if ($log -match "tcp://([a-zA-0-9\.-]+:\d+)") { $addr = $matches[1] }
+          
           if (-not $addr) {
-            Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 nokey@localhost.run" -RedirectStandardOutput "C:\lhr.log" -RedirectStandardError "C:\lhr-err.log" -WindowStyle Hidden
+            Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 nokey@localhost.run" -RedirectStandardOutput "C:\l.log" -WindowStyle Hidden
             Start-Sleep 10
-            for ($i = 0; $i -lt 20; $i++) {
-              $lhrLog = @(Get-Content "C:\lhr.log" -EA 0) + @(Get-Content "C:\lhr-err.log" -EA 0)
-              $lm = $lhrLog | Select-String "([a-zA-0-9\.-]+\.lhrtunnels\.link:\d+)"
-              if ($lm) {
-                $addr = $lm.Matches[0].Groups[1].Value
-                break
-              }
-              Start-Sleep 2
-            }
+            $log = Get-Content "C:\l.log" -EA 0
+            if ($log -match "([a-zA-0-9\.-]+\.lhrtunnels\.link:\d+)") { $addr = $matches[1] }
           }
-
-          if (-not $addr) { Write-Host "TUNNEL ERROR"; Get-Content "C:\pinggy-err.log" -EA 0; exit 1 }
-
-          Write-Host ""
-          Write-Host "================================================================"
-          Write-Host "          NHAP THONG TIN NAY VAO RD CLIENT ANDROID"
-          Write-Host "================================================================"
-          Write-Host ""
-          Write-Host "  PC NAME  : $addr"
-          Write-Host "  USERNAME : $u"
-          Write-Host "  PASSWORD : $p"
-          Write-Host ""
-          Write-Host "================================================================"
-          Write-Host "::notice title=KET NOI RDP::$addr | User: $u | Pass: $p"
+          
+          if (-not $addr) { Write-Host "TUNNEL FAILURE"; exit 1 }
+          
+          Write-Host "=========================================="
+          Write-Host "PC NAME: $addr"
+          Write-Host "USER: $u"
+          Write-Host "PASS: $p"
+          Write-Host "=========================================="
+          Write-Host "::notice title=RDP::$addr | $u | $p"
           Add-Content $env:GITHUB_ENV "RDP_ADDR=$addr"
 
-      - name: KeepAlive
+      - name: Alive
         shell: powershell
         run: |
           $end = (Get-Date).AddHours([int]"${{ github.event.inputs.hours }}")
           while ((Get-Date) -lt $end) {
-            Start-Sleep 30
-            $ssh = Get-Process ssh -EA 0
-            if (-not $ssh) {
-              Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:3389 a.pinggy.io" -RedirectStandardOutput "C:\pinggy.log" -WindowStyle Hidden
+            Start-Sleep 60
+            if (-not (Get-Process ssh -EA 0)) {
+              Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:3389 a.pinggy.io" -RedirectStandardOutput "C:\p.log" -WindowStyle Hidden
             }
           }
