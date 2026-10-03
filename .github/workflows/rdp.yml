@@ -1,89 +1,107 @@
-name: Windows RDP
+name: RDP by DucThang x TrueHieu (V7 - Chốt Hạ Tuyệt Đối)
+
 on:
   workflow_dispatch:
-    inputs:
-      username:
-        required: true
-        default: admin
-      password:
-        required: true
-        default: Vps@2024#Secure!
-      hours:
-        required: true
-        default: "6"
-        type: choice
-        options: ["1","2","3","4","5","6"]
-jobs:
-  rdp:
-    runs-on: windows-latest
-    timeout-minutes: 360
-    steps:
-      - name: Setup
-        shell: powershell
-        run: |
-          Set-MpPreference -DisableRealtimeMonitoring $true -EA 0
-          Set-MpPreference -DisableBehaviorMonitoring $true -EA 0
-          
-          $u = "${{ github.event.inputs.username }}"
-          $p = "${{ github.event.inputs.password }}"
-          $sec = ConvertTo-SecureString $p -AsPlainText -Force
-          if (Get-LocalUser $u -EA 0) { Set-LocalUser $u -Password $sec } else { New-LocalUser $u -Password $sec -PasswordNeverExpires }
-          Add-LocalGroupMember Administrators $u -EA 0
-          Add-LocalGroupMember "Remote Desktop Users" $u -EA 0
-          
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" "fDenyTSConnections" 0
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" "UserAuthentication" 0
-          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" "SecurityLayer" 0
-          
-          $path = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
-          if (-not (Test-Path $path)) { New-Item $path -Force | Out-Null }
-          Set-ItemProperty $path "SelectTransport" 0 -EA 0
-          Set-ItemProperty $path "bEnumerateHWBeforeSW" 1 -EA 0
-          Set-ItemProperty $path "AVC444ModePreferred" 1 -EA 0
-          Set-ItemProperty $path "AVCHardwareEncodePreferred" 1 -EA 0
-          Set-ItemProperty $path "fEnableUdpTransport" 1 -EA 0
-          Set-ItemProperty $path "MaxFrameRate" 60 -EA 0
-          
-          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>$null
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -EA 0
-          
-          Restart-Service TermService -Force -EA 0
-          
-          $sshDir = "$env:USERPROFILE\.ssh"
-          if (-not (Test-Path $sshDir)) { New-Item -ItemType Directory $sshDir -Force | Out-Null }
-          if (-not (Test-Path "$sshDir\id_rsa")) { ssh-keygen -t rsa -b 2048 -f "$sshDir\id_rsa" -N '""' -q }
-          
-          Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:3389 a.pinggy.io" -RedirectStandardOutput "C:\p.log" -RedirectStandardError "C:\p-e.log" -WindowStyle Hidden
-          Start-Sleep 10
-          
-          $addr = $null
-          $log = Get-Content "C:\p.log" -EA 0
-          if ($log -match "tcp://([a-zA-0-9\.-]+:\d+)") { $addr = $matches[1] }
-          
-          if (-not $addr) {
-            Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 nokey@localhost.run" -RedirectStandardOutput "C:\l.log" -WindowStyle Hidden
-            Start-Sleep 10
-            $log = Get-Content "C:\l.log" -EA 0
-            if ($log -match "([a-zA-0-9\.-]+\.lhrtunnels\.link:\d+)") { $addr = $matches[1] }
-          }
-          
-          if (-not $addr) { Write-Host "TUNNEL FAILURE"; exit 1 }
-          
-          Write-Host "=========================================="
-          Write-Host "PC NAME: $addr"
-          Write-Host "USER: $u"
-          Write-Host "PASS: $p"
-          Write-Host "=========================================="
-          Write-Host "::notice title=RDP::$addr | $u | $p"
-          Add-Content $env:GITHUB_ENV "RDP_ADDR=$addr"
+  schedule:
+    - cron: "0 */5 * * *"
 
-      - name: Alive
-        shell: powershell
+concurrency:
+  group: vps-bore-runner
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    timeout-minutes: 1440
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download and Extract Bore
         run: |
-          $end = (Get-Date).AddHours([int]"${{ github.event.inputs.hours }}")
-          while ((Get-Date) -lt $end) {
-            Start-Sleep 60
-            if (-not (Get-Process ssh -EA 0)) {
-              Start-Process "ssh" "-o StrictHostKeyChecking=no -o ServerAliveInterval=30 -p 443 -R 0:localhost:3389 a.pinggy.io" -RedirectStandardOutput "C:\p.log" -WindowStyle Hidden
-            }
+          Invoke-WebRequest -Uri "https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-pc-windows-msvc.zip" -OutFile bore.zip
+          Expand-Archive bore.zip -DestinationPath bore
+
+      - name: Enable RDP + Create Admin User
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          $pass = ConvertTo-SecureString "WindowsRDP2026@" -AsPlainText -Force
+          New-LocalUser "admin" -Password $pass -FullName "admin"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "admin"
+          Add-LocalGroupMember -Group "Administrators" -Member "admin"
+
+      - name: Tối ưu Registry 4K
+        run: |
+          $tsPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
+          if (!(Test-Path $tsPath)) { New-Item -Path $tsPath -Force }
+          Set-ItemProperty -Path $tsPath -Name "fEnableVirtualizedGraphics" -Value 1 -Type DWord
+          Set-ItemProperty -Path $tsPath -Name "MinFrameRate" -Value 120 -Type DWord
+
+      - name: Monitor Bore Stream & Force Update File
+        run: |
+          $PASS = "WindowsRDP2026@"
+          $USER = "admin"
+          $lastFullAddress = ""
+
+          # Cấu hình Git ép buộc
+          git config --global user.name "TrueHieu-Bot"
+          git config --global user.email "bot@trueteam.top"
+          git config --global core.autocrlf false
+
+          Write-Host "🚀 Đang truy quét Stream của Bore... Đợi Port về nhé đại ca!"
+
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = ".\bore\bore.exe"
+          $psi.Arguments = "local 3389 --to bore.pub"
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardOutput = $true
+          $process = [System.Diagnostics.Process]::Start($psi)
+
+          while (!$process.HasExited) {
+              $line = $process.StandardOutput.ReadLine()
+              if ($line) { Write-Host "[bore] $line" }
+              # Bore v0.5.1 in: "listening at bore.pub:PORT"; bản cũ: "remote forwarding at bore.pub:PORT"
+              if ($line -match "(?:listening at|remote forwarding at) (bore\.pub:\d+)") {
+                  $fullAddress = $matches[1]
+                  $portOnly = $fullAddress.Split(':')[1]
+
+                  if ($fullAddress -ne $lastFullAddress) {
+                      $lastFullAddress = $fullAddress
+                      
+                      # LOGIC GHI ĐÈ MẠNH MẼ: Xóa sạch file cũ nếu có để tránh kẹt
+                      if (Test-Path "rdp_info.txt") { Remove-Item "rdp_info.txt" -Force }
+
+                      $createdAt = (Get-Date).ToString('HH:mm:ss dd/MM/yyyy')
+                      $reportLines = @(
+                        '=======================================================',
+                        'RDP INFO - DucThang x TrueHieu Edition',
+                        '=======================================================',
+                        "FULL ADDRESS   : $fullAddress",
+                        "PORT           : $portOnly",
+                        'HOST           : bore.pub',
+                        '-------------------------------------------------------',
+                        "Username       : $USER",
+                        "Password       : $PASS",
+                        "Created        : $createdAt",
+                        '======================================================='
+                      )
+                      $report = ($reportLines -join "`r`n")
+                      [System.IO.File]::WriteAllText("$(Get-Location)\rdp_info.txt", $report)
+                      
+                      # Commit và Push bằng lệnh Force
+                      git checkout main
+                      git add rdp_info.txt
+                      git commit -m "Update RDP: $portOnly [skip ci]"
+                      git push origin main --force
+                      
+                      Write-Host "✅ ĐÃ ÉP CẬP NHẬT REPO: $fullAddress"
+                  }
+              }
+              Start-Sleep -Milliseconds 200
           }
